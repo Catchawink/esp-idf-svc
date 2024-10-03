@@ -52,7 +52,7 @@ embassy-futures = "0.1"
 embedded-svc = { git = "https://github.com/esp-rs/embedded-svc.git" }
 esp-idf-sys = { git = "https://github.com/Catchawink/esp-idf-sys.git" }
 esp-idf-hal = { git = "https://github.com/Catchawink/esp-idf-hal.git" }
-# embuild ={ git = "https://github.com/esp-rs/embuild"}
+esp-idf-hal = { git = "https://github.com/Catchawink/esp-idf-hal.git" }
 
 [build-dependencies]
 embuild = { version = "0.32.0", features = ["espidf"] }
