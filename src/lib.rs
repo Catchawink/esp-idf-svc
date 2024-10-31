@@ -58,6 +58,8 @@ pub mod espnow;
 pub mod eth;
 #[cfg(all(feature = "alloc", esp_idf_comp_esp_event_enabled))]
 pub mod eventloop;
+#[cfg(feature = "experimental")]
+pub mod fs;
 pub mod hal;
 pub mod handle;
 #[cfg(feature = "alloc")]
@@ -91,6 +93,16 @@ pub mod ping;
 pub mod sntp;
 pub mod sys;
 pub mod systime;
+#[cfg(all(
+    feature = "alloc",
+    feature = "experimental",
+    esp_idf_comp_openthread_enabled,
+    esp_idf_openthread_enabled,
+    esp_idf_comp_esp_event_enabled,
+    esp_idf_comp_nvs_flash_enabled,
+    esp_idf_comp_vfs_enabled,
+))]
+pub mod thread;
 #[cfg(all(feature = "alloc", esp_idf_comp_esp_timer_enabled))]
 pub mod timer;
 pub mod tls;
@@ -102,10 +114,5 @@ pub mod tls;
 ))]
 pub mod wifi;
 pub mod ws;
-
-#[cfg(all(feature = "alloc", esp_idf_comp_vfs_enabled))]
-pub mod fs;
-
-pub mod sd;
 
 mod private;

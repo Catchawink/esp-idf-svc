@@ -441,9 +441,10 @@ where
     }
 }
 
-/// This struct provides a safe wrapper over the ESP IDF Wifi C driver. The driver
-/// works on Layer 2 (Data Link) in the OSI model, in that it provides facilities
-/// for sending and receiving ethernet packets over the WiFi radio.
+/// This struct provides a safe wrapper over the ESP IDF Wifi C driver.
+///
+/// The driver works on Layer 2 (Data Link) in the OSI model, in that it provides
+/// facilities for sending and receiving ethernet packets over the WiFi radio.
 ///
 /// For most use cases, utilizing `EspWifi` - which provides a networking (IP)
 /// layer as well - should be preferred. Using `WifiDriver` directly is beneficial
@@ -525,9 +526,9 @@ impl<'d> WifiDriver<'d> {
                 WifiEvent::ApStopped => guard.ap = WifiApStatus::Stopped,
                 WifiEvent::StaStarted => guard.sta = WifiStaStatus::Started,
                 WifiEvent::StaStopped => guard.sta = WifiStaStatus::Stopped,
-                WifiEvent::StaConnected => guard.sta = WifiStaStatus::Connected,
-                WifiEvent::StaDisconnected => guard.sta = WifiStaStatus::Started,
-                WifiEvent::ScanDone => guard.scan = WifiScanStatus::Done,
+                WifiEvent::StaConnected(_) => guard.sta = WifiStaStatus::Connected,
+                WifiEvent::StaDisconnected(_) => guard.sta = WifiStaStatus::Started,
+                WifiEvent::ScanDone(_) => guard.scan = WifiScanStatus::Done,
                 WifiEvent::StaWpsSuccess(_)
                 | WifiEvent::StaWpsFailed
                 | WifiEvent::StaWpsTimeout
@@ -542,6 +543,7 @@ impl<'d> WifiDriver<'d> {
 
     fn init(nvs_enabled: bool) -> Result<(), EspError> {
         #[allow(clippy::needless_update)]
+        #[allow(unused_unsafe)]
         let cfg = wifi_init_config_t {
             #[cfg(esp_idf_version_major = "4")]
             event_handler: Some(esp_event_send_internal),
@@ -552,6 +554,8 @@ impl<'d> WifiDriver<'d> {
             tx_buf_type: CONFIG_ESP32_WIFI_TX_BUFFER_TYPE as _,
             static_tx_buf_num: WIFI_STATIC_TX_BUFFER_NUM as _,
             dynamic_tx_buf_num: WIFI_DYNAMIC_TX_BUFFER_NUM as _,
+            rx_mgmt_buf_type: CONFIG_ESP_WIFI_DYNAMIC_RX_MGMT_BUF as _,
+            rx_mgmt_buf_num: WIFI_RX_MGMT_BUF_NUM_DEF as _,
             cache_tx_buf_num: WIFI_CACHE_TX_BUFFER_NUM as _,
             csi_enable: WIFI_CSI_ENABLED as _,
             ampdu_rx_enable: WIFI_AMPDU_RX_ENABLED as _,
@@ -559,7 +563,6 @@ impl<'d> WifiDriver<'d> {
             amsdu_tx_enable: WIFI_AMSDU_TX_ENABLED as _,
             nvs_enable: i32::from(nvs_enabled),
             nano_enable: WIFI_NANO_FORMAT_ENABLED as _,
-            //tx_ba_win: WIFI_DEFAULT_TX_BA_WIN as _,
             rx_ba_win: WIFI_DEFAULT_RX_BA_WIN as _,
             wifi_task_core_id: WIFI_TASK_CORE_ID as _,
             beacon_max_len: WIFI_SOFTAP_BEACON_MAX_LEN as _,
@@ -586,7 +589,6 @@ impl<'d> WifiDriver<'d> {
                 not(esp_idf_version_major = "4"),
                 all(
                     esp_idf_version_major = "4",
-                    not(esp_idf_version_minor = "3"),
                     any(
                         not(esp_idf_version_minor = "4"),
                         all(
@@ -600,6 +602,28 @@ impl<'d> WifiDriver<'d> {
             ))]
             espnow_max_encrypt_num: CONFIG_ESP_WIFI_ESPNOW_MAX_ENCRYPT_NUM as i32,
             magic: WIFI_INIT_CONFIG_MAGIC as _,
+            // Available since ESP IDF V5.3.0
+            #[cfg(any(
+                all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
+                all(
+                    esp_idf_version_major = "5",
+                    not(esp_idf_version = "5.0"),
+                    not(esp_idf_version = "5.1"),
+                    not(esp_idf_version = "5.2"),
+                ),
+            ))]
+            tx_hetb_queue_num: WIFI_TX_HETB_QUEUE_NUM as _,
+            // Available since ESP IDF V5.3.0
+            #[cfg(any(
+                all(not(esp_idf_version_major = "4"), not(esp_idf_version_major = "5")),
+                all(
+                    esp_idf_version_major = "5",
+                    not(esp_idf_version = "5.0"),
+                    not(esp_idf_version = "5.1"),
+                    not(esp_idf_version = "5.2"),
+                ),
+            ))]
+            dump_hesigb_enable: WIFI_DUMP_HESIGB_ENABLED != 0,
             ..Default::default()
         };
         esp!(unsafe { esp_wifi_init(&cfg) })?;
@@ -950,8 +974,6 @@ impl<'d> WifiDriver<'d> {
         };
 
         let fetched_count = self.fetch_scan_result(&mut ap_infos_raw)?;
-
-        self.status.lock().scan = WifiScanStatus::Idle;
 
         let result = ap_infos_raw[..fetched_count]
             .iter()
@@ -1308,6 +1330,7 @@ impl<'d> WifiDriver<'d> {
         len: u16,
         eb: *mut ffi::c_void,
     ) -> esp_err_t {
+        #[allow(static_mut_refs)]
         let res = RX_CALLBACK.as_mut().unwrap()(device_id, WifiFrame::new(buf.cast(), len, eb));
 
         match res {
@@ -1317,11 +1340,20 @@ impl<'d> WifiDriver<'d> {
     }
 
     unsafe extern "C" fn handle_tx(ifidx: u8, data: *mut u8, len: *mut u16, tx_status: bool) {
+        #[allow(static_mut_refs)]
         TX_CALLBACK.as_mut().unwrap()(
             (ifidx as wifi_interface_t).into(),
             core::slice::from_raw_parts(data as *const _, len as usize),
             tx_status,
         );
+    }
+
+    pub fn get_rssi(&self) -> Result<i32, EspError> {
+        let mut rssi: core::ffi::c_int = 0;
+        unsafe {
+            esp_wifi_sta_get_rssi(&mut rssi as *mut core::ffi::c_int);
+        };
+        Ok(rssi as i32)
     }
 }
 
@@ -1470,9 +1502,11 @@ impl Drop for WifiFrame {
 }
 
 /// `EspWifi` wraps a `WifiDriver` Data Link layer instance, and binds the OSI
-/// Layer 3 (network) facilities of ESP IDF to it. In other words, it connects
-/// the ESP IDF AP and STA Netif interfaces to the Wifi driver. This allows users
-/// to utilize the Rust STD APIs for working with TCP and UDP sockets.
+/// Layer 3 (network) facilities of ESP IDF to it.
+///
+/// In other words, it connects the ESP IDF AP and STA Netif interfaces to the
+/// Wifi driver. This allows users to utilize the Rust STD APIs for working with
+/// TCP and UDP sockets.
 ///
 /// This struct should be the default option for a Wifi driver in all use cases
 /// but the niche one where bypassing the ESP IDF Netif and lwIP stacks is
@@ -1769,6 +1803,10 @@ impl<'d> EspWifi<'d> {
 
         Ok(())
     }
+
+    pub fn get_rssi(&self) -> Result<i32, EspError> {
+        self.driver().get_rssi()
+    }
 }
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
@@ -1885,15 +1923,193 @@ impl<'d> NetifStatus for EspWifi<'d> {
 
 #[derive(Copy, Clone)]
 #[repr(transparent)]
-pub struct WpsCredentialsRef(wifi_event_sta_wps_er_success_t__bindgen_ty_1);
+pub struct StaScanDoneRef(wifi_event_sta_scan_done_t);
+
+impl StaScanDoneRef {
+    /// Whether this scan is a success or not
+    pub fn is_successful(&self) -> bool {
+        self.0.status == 0
+    }
+
+    /// Number of scan results
+    pub fn len(&self) -> usize {
+        self.0.number as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Sequential identifier of the scan
+    pub fn id(&self) -> u8 {
+        self.0.scan_id
+    }
+}
+
+impl fmt::Debug for StaScanDoneRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StaScanDoneRef")
+            .field("is_successful", &self.is_successful())
+            .field("len", &self.len())
+            .field("id", &self.id())
+            .finish()
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct StaConnectedRef(wifi_event_sta_connected_t);
+
+impl StaConnectedRef {
+    /// SSID of the AP we connected to
+    pub fn ssid(&self) -> &[u8] {
+        &self.0.ssid.as_slice()[..self.0.ssid_len as usize]
+    }
+
+    /// BSSID (or MAC address) of the AP we connected to
+    pub fn bssid(&self) -> [u8; 6] {
+        self.0.bssid
+    }
+
+    /// Channel used for the connection to the AP
+    pub fn channel(&self) -> u8 {
+        self.0.channel
+    }
+
+    /// Authentication method used for connecting to the AP
+    pub fn authmode(&self) -> AuthMethod {
+        Option::<AuthMethod>::from(Newtype(self.0.authmode)).unwrap()
+    }
+
+    #[cfg(not(esp_idf_version_major = "4"))]
+    /// Association ID given by the AP
+    pub fn aid(&self) -> u16 {
+        self.0.aid
+    }
+}
+
+impl fmt::Debug for StaConnectedRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut d = f.debug_struct("StaConnectedRef");
+
+        let d = d
+            .field("ssid", &alloc::string::String::from_utf8_lossy(self.ssid()))
+            .field("bssid", &self.bssid())
+            .field("channel", &self.channel())
+            .field("authmode", &self.authmode());
+
+        #[cfg(not(esp_idf_version_major = "4"))]
+        let d = d.field("aid", &self.aid());
+
+        d.finish()
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct StaDisconnectedRef(wifi_event_sta_disconnected_t);
+
+impl StaDisconnectedRef {
+    /// SSID of the AP we disconnected from
+    pub fn ssid(&self) -> &[u8] {
+        &self.0.ssid.as_slice()[..self.0.ssid_len as usize]
+    }
+
+    /// BSSID (or MAC address) of the AP we disconnected from
+    pub fn bssid(&self) -> [u8; 6] {
+        self.0.bssid
+    }
+
+    /// The reason for disconnection
+    pub fn reason(&self) -> u16 {
+        self.0.reason as u16
+    }
+
+    /// RSSI at the time of disconnection
+    pub fn rssi(&self) -> i8 {
+        self.0.rssi
+    }
+}
+
+impl fmt::Debug for StaDisconnectedRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StaDisconnectedRef")
+            .field("ssid", &alloc::string::String::from_utf8_lossy(self.ssid()))
+            .field("bssid", &self.bssid())
+            .field("reason", &self.reason())
+            .field("rssi", &self.rssi())
+            .finish()
+    }
+}
 
 #[derive(Copy, Clone)]
 #[repr(transparent)]
 pub struct ApStaConnectedRef(wifi_event_ap_staconnected_t);
 
+impl ApStaConnectedRef {
+    /// MAC address of the station connected to ESP32 soft-AP
+    pub fn mac(&self) -> [u8; 6] {
+        self.0.mac
+    }
+
+    /// the aid that ESP32 soft-AP gives to the station connected to
+    pub fn aid(&self) -> u8 {
+        self.0.aid
+    }
+
+    /// flag to identify mesh child
+    pub fn is_mesh_child(&self) -> bool {
+        self.0.is_mesh_child
+    }
+}
+
 #[derive(Copy, Clone)]
 #[repr(transparent)]
 pub struct ApStaDisconnectedRef(wifi_event_ap_stadisconnected_t);
+
+impl ApStaDisconnectedRef {
+    /// MAC address of the station disconnects to ESP32 soft-AP
+    pub fn mac(&self) -> [u8; 6] {
+        self.0.mac
+    }
+
+    /// the aid that ESP32 soft-AP gave to the station disconnects to
+    pub fn aid(&self) -> u8 {
+        self.0.aid
+    }
+
+    /// flag to identify mesh child
+    pub fn is_mesh_child(&self) -> bool {
+        self.0.is_mesh_child
+    }
+
+    /// reason of disconnection
+    #[cfg(not(any(
+        esp_idf_version_major = "4",
+        all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
+    )))]
+    #[allow(clippy::unnecessary_cast)]
+    pub fn reason(&self) -> u16 {
+        self.0.reason as u16
+    }
+}
+
+impl fmt::Debug for ApStaDisconnectedRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut ds = f.debug_struct("ApStaDisconnectedRef");
+        ds.field("mac", &self.mac())
+            .field("aid", &self.aid())
+            .field("is_mesh_child", &self.is_mesh_child());
+
+        #[cfg(not(any(
+            esp_idf_version_major = "4",
+            all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
+        )))]
+        ds.field("reason", &self.reason());
+
+        ds.finish()
+    }
+}
 
 #[cfg(not(any(
     esp_idf_version_major = "4",
@@ -1946,6 +2162,10 @@ impl TryFrom<u32> for WifiSecondChan {
     }
 }
 
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct WpsCredentialsRef(wifi_event_sta_wps_er_success_t__bindgen_ty_1);
+
 impl WpsCredentialsRef {
     pub fn ssid(&self) -> &CStr {
         unsafe { CStr::from_ptr(self.0.ssid.as_ptr() as *const _) }
@@ -1991,23 +2211,6 @@ impl TryFrom<&WpsCredentialsRef> for WpsCredentials {
     }
 }
 
-impl ApStaConnectedRef {
-    /// MAC address of the station connected to ESP32 soft-AP
-    pub fn mac(&self) -> [u8; 6] {
-        self.0.mac
-    }
-
-    /// the aid that ESP32 soft-AP gives to the station connected to
-    pub fn aid(&self) -> u8 {
-        self.0.aid
-    }
-
-    /// flag to identify mesh child
-    pub fn is_mesh_child(&self) -> bool {
-        self.0.is_mesh_child
-    }
-}
-
 impl fmt::Debug for ApStaConnectedRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ApStaConnectedRef")
@@ -2018,59 +2221,16 @@ impl fmt::Debug for ApStaConnectedRef {
     }
 }
 
-impl ApStaDisconnectedRef {
-    /// MAC address of the station disconnects to ESP32 soft-AP
-    pub fn mac(&self) -> [u8; 6] {
-        self.0.mac
-    }
-
-    /// the aid that ESP32 soft-AP gave to the station disconnects to
-    pub fn aid(&self) -> u8 {
-        self.0.aid
-    }
-
-    /// flag to identify mesh child
-    pub fn is_mesh_child(&self) -> bool {
-        self.0.is_mesh_child
-    }
-
-    /// reason of disconnection
-    #[cfg(not(any(
-        esp_idf_version_major = "4",
-        all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
-    )))]
-    pub fn reason(&self) -> u8 {
-        self.0.reason
-    }
-}
-
-impl fmt::Debug for ApStaDisconnectedRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ds = f.debug_struct("ApStaDisconnectedRef");
-        ds.field("mac", &self.mac())
-            .field("aid", &self.aid())
-            .field("is_mesh_child", &self.is_mesh_child());
-
-        #[cfg(not(any(
-            esp_idf_version_major = "4",
-            all(esp_idf_version_major = "5", esp_idf_version_minor = "0"),
-        )))]
-        ds.field("reason", &self.reason());
-
-        ds.finish()
-    }
-}
-
 #[derive(Copy, Clone, Debug)]
 pub enum WifiEvent<'a> {
     Ready,
 
-    ScanDone,
+    ScanDone(&'a StaScanDoneRef),
 
     StaStarted,
     StaStopped,
-    StaConnected,
-    StaDisconnected,
+    StaConnected(&'a StaConnectedRef),
+    StaDisconnected(&'a StaDisconnectedRef),
     StaAuthmodeChanged,
     StaBssRssiLow,
     StaBeaconTimeout,
@@ -2115,11 +2275,15 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
 
         match event_id {
             wifi_event_t_WIFI_EVENT_WIFI_READY => WifiEvent::Ready,
-            wifi_event_t_WIFI_EVENT_SCAN_DONE => WifiEvent::ScanDone,
+            wifi_event_t_WIFI_EVENT_SCAN_DONE => WifiEvent::ScanDone(unsafe { data.as_payload() }),
             wifi_event_t_WIFI_EVENT_STA_START => WifiEvent::StaStarted,
             wifi_event_t_WIFI_EVENT_STA_STOP => WifiEvent::StaStopped,
-            wifi_event_t_WIFI_EVENT_STA_CONNECTED => WifiEvent::StaConnected,
-            wifi_event_t_WIFI_EVENT_STA_DISCONNECTED => WifiEvent::StaDisconnected,
+            wifi_event_t_WIFI_EVENT_STA_CONNECTED => {
+                WifiEvent::StaConnected(unsafe { data.as_payload() })
+            }
+            wifi_event_t_WIFI_EVENT_STA_DISCONNECTED => {
+                WifiEvent::StaDisconnected(unsafe { data.as_payload() })
+            }
             wifi_event_t_WIFI_EVENT_STA_AUTHMODE_CHANGE => WifiEvent::StaAuthmodeChanged,
             wifi_event_t_WIFI_EVENT_STA_WPS_ER_SUCCESS => {
                 let credentials: &[wifi_event_sta_wps_er_success_t__bindgen_ty_1] = data
@@ -2149,26 +2313,10 @@ impl<'a> EspEventDeserializer for WifiEvent<'a> {
             wifi_event_t_WIFI_EVENT_AP_START => WifiEvent::ApStarted,
             wifi_event_t_WIFI_EVENT_AP_STOP => WifiEvent::ApStopped,
             wifi_event_t_WIFI_EVENT_AP_STACONNECTED => {
-                let payload = unsafe {
-                    (data.payload.unwrap() as *const _ as *const wifi_event_ap_staconnected_t)
-                        .as_ref()
-                };
-                WifiEvent::ApStaConnected(unsafe {
-                    core::mem::transmute::<&wifi_event_ap_staconnected_t, &ApStaConnectedRef>(
-                        payload.unwrap(),
-                    )
-                })
+                WifiEvent::ApStaConnected(unsafe { data.as_payload() })
             }
             wifi_event_t_WIFI_EVENT_AP_STADISCONNECTED => {
-                let payload = unsafe {
-                    (data.payload.unwrap() as *const _ as *const wifi_event_ap_stadisconnected_t)
-                        .as_ref()
-                };
-                WifiEvent::ApStaDisconnected(unsafe {
-                    core::mem::transmute::<&wifi_event_ap_stadisconnected_t, &ApStaDisconnectedRef>(
-                        payload.unwrap(),
-                    )
-                })
+                WifiEvent::ApStaDisconnected(unsafe { data.as_payload() })
             }
             wifi_event_t_WIFI_EVENT_AP_PROBEREQRECVED => WifiEvent::ApProbeRequestReceived,
             wifi_event_t_WIFI_EVENT_FTM_REPORT => WifiEvent::FtmReport,

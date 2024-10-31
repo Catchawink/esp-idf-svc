@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.1] - 2024-07-09
+### Fixed
+* Bluetooth: The experimental Bluedroid support did not compile on esp32c2, esp32h2 and esp32c6 (#447)
+
+## [0.49.0] - 2024-06-23
+
+### Deprecated
+**ESP-IDF v4.4** Please start upgrading to ESP-IDF v5.
+### Breaking
+* **removed** ESP-IDF v4.3 support, including mostly conditional compilations. (#431)
+* wifi: now can use embedded-svc PmfConfiguration, ScanMethod, and ScanSortMethod in ClientConfiguration. (#381)
+* wifi: The WifiEvent's ApStaConnected and ApStaDisconnected were changed to include the idf's wifi_event. (#396)
+* eth: callbacks now use newly added EthFrames instead of &[u8]. (#406)
+* wifi: callbacks now use newly added WifiFrames instead of &[u8]. (#406)
+* http_server: Configuration now allows for setting the ctrl_port. (#427)
+* http_server: UB fix: `handler`, `fn_handler` and `handler_chain` all now only accept `'static` callbacks,
+  which is the only safe option in the presence of `core::mem::forget` on the HTTP server. All of those have the
+  previous behavior preserved in the form of `unsafe` `*_nonstatic` variants which were added. (#437)
+* tls: negotiate now returns the new CompletedHandshake struct instead of (). (#428)
+* wifi: Remove AUTOUP as the default flag on ClientConfiguration:Fixed. (#426)
+* tls: Allow TLS negotiation on a multi-threaded executor. (#432)
+* MSRV: 1.77 (due to `core::net` which is re-exported by `embedded-svc` and is stable since Rust 1.77)
+### Added
+* tls: Support for TLS server. (#368)
+* ws: expose crt_bundle_attach to EspWebSocketClientConfig. (#391)
+* ping: can now be used with disabled IPv6. (#418)
+* wifi: EspWifi's wrap_all method now supports only wrapping sta if softAp is disabled. (#376)
+* sd: **New SD mmc & spi drivers**. Check out the sd_mmc and sd_spi examples. (#422)
+* fs: new wrapper implementation around fat. (#422)
+* tls: Make EspTls and EspAsyncTls Send when possible. (#429)
+* ble/gatt: **New BLE GATT server support using Bluedroid.** Check out the bt_gatt_server example. (#421)
+### Fixed
+* nvs: encrypted partition could not find partition by name. (#387)
+* ota: handle partition errors gracefully. (#393)
+* http_client: flush responses to avoid repeated request failures. (#404)
+* eth: missing error return inside the rx_callback function. (#414)
+* wifi: AccessPointConfiguration now correctly limits max_connections. (#426)
+* wifi: Fix WPS regression around null termination of ssid/password. (#379)
+* Compatibility with ESP-IDF v5.3 (pre-release): various fixes such that esp-idf-svc can be used against the latest esp-idf versions. (#434)
+
 ## [0.48.1] - 2024-02-21
 * Disable the `esp_idf_svc::io::vfs` module if the ESP IDF VFS component is not enabled either
 * Bugfix / async MQTT: The internal `Unblocker` utility was missing `drop` and therefore did not delete its task properly, resulting in a crash when the async MQTT client is dropped

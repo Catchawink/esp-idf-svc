@@ -246,7 +246,7 @@ impl<'a> EspEvent<'a> {
     ///
     /// Care should be taken to only call this function on fetch data that one is certain to be
     /// of type `P`
-    pub unsafe fn as_payload<P: Copy + Send + 'static>(&self) -> &P {
+    pub unsafe fn as_payload<P: Copy + Send + 'static>(&self) -> &'a P {
         let payload: &P = if mem::size_of::<P>() > 0 {
             self.payload.unwrap() as *const _ as *const P
         } else {
@@ -441,12 +441,16 @@ where
             self.given = false;
         }
 
-        if let Some(data) = self.receiver.get_shared_async().await {
+        while let Some(data) = self.receiver.get_shared_async().await {
+            if Some(data.source) != D::source() {
+                self.receiver.done();
+                continue;
+            }
             self.given = true;
-            Ok(D::deserialize(data))
-        } else {
-            Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>())
+            return Ok(D::deserialize(data));
         }
+
+        Err(EspError::from_infallible::<ESP_ERR_INVALID_STATE>())
     }
 }
 
