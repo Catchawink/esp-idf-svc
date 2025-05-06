@@ -3,8 +3,6 @@ use core::marker::PhantomData;
 use core::time::Duration;
 use core::{ffi, ops, ptr};
 
-use ::log::*;
-
 extern crate alloc;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
@@ -279,7 +277,7 @@ impl<T> Drop for SpiEth<T> {
         if let Some(device) = self.device {
             esp!(unsafe { spi_bus_remove_device(device) }).unwrap();
 
-            info!("SpiEth dropped");
+            ::log::info!("SpiEth dropped");
         }
     }
 }
@@ -855,7 +853,7 @@ impl<'d, T> EthDriver<'d, T> {
         let mut handle: esp_eth_handle_t = ptr::null_mut();
         esp!(unsafe { esp_eth_driver_install(&cfg, &mut handle) })?;
 
-        info!("Driver initialized");
+        ::log::info!("Driver initialized");
 
         if let Some(mac_addr) = mac_addr {
             esp!(unsafe {
@@ -866,7 +864,7 @@ impl<'d, T> EthDriver<'d, T> {
                 )
             })?;
 
-            info!("Attached MAC address: {:?}", mac_addr);
+            ::log::info!("Attached MAC address: {mac_addr:?}");
         }
 
         let (waitable, subscription) = Self::subscribe(handle, &sysloop)?;
@@ -880,7 +878,7 @@ impl<'d, T> EthDriver<'d, T> {
             _p: PhantomData,
         };
 
-        info!("Initialization complete");
+        ::log::info!("Initialization complete");
 
         Ok(eth)
     }
@@ -927,20 +925,20 @@ impl<'d, T> EthDriver<'d, T> {
     pub fn start(&mut self) -> Result<(), EspError> {
         esp!(unsafe { esp_eth_start(self.handle) })?;
 
-        info!("Start requested");
+        ::log::info!("Start requested");
 
         Ok(())
     }
 
     pub fn stop(&mut self) -> Result<(), EspError> {
-        info!("Stopping");
+        ::log::info!("Stopping");
 
         let err = unsafe { esp_eth_stop(self.handle) };
         if err != ESP_ERR_INVALID_STATE {
             esp!(err)?;
         }
 
-        info!("Stop requested");
+        ::log::info!("Stop requested");
 
         Ok(())
     }
@@ -1027,7 +1025,30 @@ impl<'d, T> EthDriver<'d, T> {
             esp!(esp_eth_driver_uninstall(self.handle))?;
         }
 
-        info!("Driver deinitialized");
+        ::log::info!("Driver deinitialized");
+
+        Ok(())
+    }
+
+    /// Enables or disables promiscuous mode for the [`EthDriver`].
+    ///
+    /// When promiscuous mode is enabled, the driver captures all Ethernet frames
+    /// on the network, regardless of their destination MAC address. This is useful for
+    /// debugging or monitoring purposes.
+    pub fn set_promiscuous(&mut self, state: bool) -> Result<(), EspError> {
+        esp!(unsafe {
+            esp_eth_ioctl(
+                self.handle(),
+                esp_eth_io_cmd_t_ETH_CMD_S_PROMISCUOUS,
+                &raw const state as *mut _,
+            )
+        })?;
+
+        if state {
+            ::log::info!("Driver set in promiscuous mode");
+        } else {
+            ::log::info!("Driver set in non-promiscuous mode");
+        }
 
         Ok(())
     }
@@ -1041,12 +1062,14 @@ impl<'d, T> EthDriver<'d, T> {
         }
     }
 
+    #[allow(clippy::needless_update)]
     fn eth_phy_default_config(reset_pin: Option<i32>, phy_addr: Option<u32>) -> eth_phy_config_t {
         eth_phy_config_t {
             phy_addr: phy_addr.map(|a| a as i32).unwrap_or(ESP_ETH_PHY_ADDR_AUTO),
             reset_timeout_ms: 100,
             autonego_timeout_ms: 4000,
             reset_gpio_num: reset_pin.unwrap_or(-1),
+            ..Default::default()
         }
     }
 
@@ -1069,14 +1092,14 @@ impl<'d, T> EthDriver<'d, T> {
     fn eth_mac_default_config(_mdc: i32, _mdio: i32) -> eth_mac_config_t {
         eth_mac_config_t {
             sw_reset_timeout_ms: 100,
-            rx_task_stack_size: 2048,
+            rx_task_stack_size: 4096,
             rx_task_prio: 15,
             flags: 0,
         }
     }
 }
 
-impl<'d, T> Eth for EthDriver<'d, T> {
+impl<T> Eth for EthDriver<'_, T> {
     type Error = EspError;
 
     fn start(&mut self) -> Result<(), Self::Error> {
@@ -1096,17 +1119,17 @@ impl<'d, T> Eth for EthDriver<'d, T> {
     }
 }
 
-unsafe impl<'d, T> Send for EthDriver<'d, T> {}
+unsafe impl<T> Send for EthDriver<'_, T> {}
 
-impl<'d, T> Drop for EthDriver<'d, T> {
+impl<T> Drop for EthDriver<'_, T> {
     fn drop(&mut self) {
         self.clear_all().unwrap();
 
-        info!("EthDriver dropped");
+        ::log::info!("EthDriver dropped");
     }
 }
 
-impl<'d, T> RawHandle for EthDriver<'d, T> {
+impl<T> RawHandle for EthDriver<'_, T> {
     type Handle = esp_eth_handle_t;
 
     fn handle(&self) -> Self::Handle {
@@ -1261,19 +1284,19 @@ impl<'d, T> EspEth<'d, T> {
 }
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-impl<'d, T> Drop for EspEth<'d, T> {
+impl<T> Drop for EspEth<'_, T> {
     fn drop(&mut self) {
         self.detach_netif().unwrap();
 
-        info!("EspEth dropped");
+        ::log::info!("EspEth dropped");
     }
 }
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-unsafe impl<'d, T> Send for EspEth<'d, T> {}
+unsafe impl<T> Send for EspEth<'_, T> {}
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-impl<'d, T> RawHandle for EspEth<'d, T> {
+impl<T> RawHandle for EspEth<'_, T> {
     type Handle = *mut esp_eth_netif_glue_t;
 
     fn handle(&self) -> Self::Handle {
@@ -1282,7 +1305,7 @@ impl<'d, T> RawHandle for EspEth<'d, T> {
 }
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-impl<'d, T> Eth for EspEth<'d, T> {
+impl<T> Eth for EspEth<'_, T> {
     type Error = EspError;
 
     fn start(&mut self) -> Result<(), Self::Error> {
@@ -1303,7 +1326,7 @@ impl<'d, T> Eth for EspEth<'d, T> {
 }
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-impl<'d, T> NetifStatus for EspEth<'d, T> {
+impl<T> NetifStatus for EspEth<'_, T> {
     fn is_up(&self) -> Result<bool, EspError> {
         EspEth::is_up(self)
     }
@@ -1325,7 +1348,7 @@ impl EthEvent {
     }
 
     pub fn is_for_handle(&self, handle: esp_eth_handle_t) -> bool {
-        self.handle() == handle
+        core::ptr::eq(self.handle(), handle)
     }
 
     pub fn handle(&self) -> esp_eth_handle_t {
@@ -1365,7 +1388,7 @@ impl EspEventDeserializer for EthEvent {
         } else if event_id == eth_event_t_ETHERNET_EVENT_DISCONNECTED {
             EthEvent::Disconnected(*eth_handle_ref.unwrap() as _)
         } else {
-            panic!("Unknown event ID: {}", event_id);
+            panic!("Unknown event ID: {event_id}");
         }
     }
 }
@@ -1610,7 +1633,7 @@ where
 }
 
 #[cfg(esp_idf_comp_esp_netif_enabled)]
-impl<'d, T> crate::netif::asynch::NetifStatus for EspEth<'d, T> {
+impl<T> crate::netif::asynch::NetifStatus for EspEth<'_, T> {
     async fn is_up(&self) -> Result<bool, EspError> {
         EspEth::is_up(self)
     }

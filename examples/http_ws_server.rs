@@ -25,7 +25,7 @@ use esp_idf_svc::sys::{EspError, ESP_ERR_INVALID_SIZE};
 
 use log::*;
 
-use std::{borrow::Cow, collections::BTreeMap, str, sync::Mutex};
+use std::{borrow::Cow, collections::BTreeMap, ffi::CStr, str, sync::Mutex};
 
 const SSID: &str = env!("WIFI_SSID");
 const PASSWORD: &str = env!("WIFI_PASS");
@@ -75,11 +75,11 @@ impl GuessingGame {
             .trim_matches(|c: char| c.is_ascii_control() || c.is_whitespace())
             .parse::<u32>()
         else {
-            warn!("Not a number: `{}` (length {})", input, input.len());
+            warn!("Not a number: `{input}` (length {})", input.len());
             return None;
         };
         if !(1..=100).contains(&number) {
-            warn!("Not in range ({})", number);
+            warn!("Not in range ({number})");
             return None;
         }
         Some(number)
@@ -112,10 +112,10 @@ fn nth(n: u32) -> Cow<'static, str> {
             _ => unreachable!(),
         }),
         larger => Cow::Owned(match larger % 10 {
-            1 => format!("{}st", larger),
-            2 => format!("{}nd", larger),
-            3 => format!("{}rd", larger),
-            _ => format!("{}th", larger),
+            1 => format!("{larger}st"),
+            2 => format!("{larger}nd"),
+            3 => format!("{larger}rd"),
+            _ => format!("{larger}th"),
         }),
     }
 }
@@ -134,7 +134,7 @@ fn main() -> anyhow::Result<()> {
 
     let guessing_games = Mutex::new(BTreeMap::<i32, GuessingGame>::new());
 
-    server.ws_handler("/ws/guess", move |ws| {
+    server.ws_handler("/ws/guess", None, move |ws| {
         let mut sessions = guessing_games.lock().unwrap();
         if ws.is_new() {
             sessions.insert(ws.session(), GuessingGame::new((rand() % 100) + 1));
@@ -169,7 +169,13 @@ fn main() -> anyhow::Result<()> {
 
         let mut buf = [0; MAX_LEN]; // Small digit buffer can go on the stack
         ws.recv(buf.as_mut())?;
-        let Ok(user_string) = str::from_utf8(&buf[..len]) else {
+
+        let Ok(user_string) = CStr::from_bytes_until_nul(&buf[..len]) else {
+            ws.send(FrameType::Text(false), "[CStr decode Error]".as_bytes())?;
+            return Ok(());
+        };
+
+        let Ok(user_string) = user_string.to_str() else {
             ws.send(FrameType::Text(false), "[UTF-8 Error]".as_bytes())?;
             return Ok(());
         };
@@ -237,10 +243,7 @@ fn create_server() -> anyhow::Result<EspHttpServer<'static>> {
     wifi.start()?;
     wifi.wait_netif_up()?;
 
-    info!(
-        "Created Wi-Fi with WIFI_SSID `{}` and WIFI_PASS `{}`",
-        SSID, PASSWORD
-    );
+    info!("Created Wi-Fi with WIFI_SSID `{SSID}` and WIFI_PASS `{PASSWORD}`");
 
     let server_configuration = esp_idf_svc::http::server::Configuration {
         stack_size: STACK_SIZE,

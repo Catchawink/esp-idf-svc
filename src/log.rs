@@ -66,6 +66,7 @@ impl core::fmt::Write for EspStdout {
 }
 
 #[allow(non_upper_case_globals)]
+#[allow(non_snake_case)]
 impl From<Newtype<esp_log_level_t>> for LevelFilter {
     fn from(level: Newtype<esp_log_level_t>) -> Self {
         match level.0 {
@@ -94,6 +95,7 @@ impl From<LevelFilter> for Newtype<esp_log_level_t> {
 }
 
 #[allow(non_upper_case_globals)]
+#[allow(non_snake_case)]
 impl From<Newtype<esp_log_level_t>> for Level {
     fn from(level: Newtype<esp_log_level_t>) -> Self {
         match level.0 {
@@ -193,10 +195,10 @@ impl EspLogger {
         }
     }
 
-    fn get_color(level: Level) -> Option<u8> {
+    fn get_color(_level: Level) -> Option<u8> {
         #[cfg(esp_idf_log_colors)]
         {
-            match level {
+            match _level {
                 Level::Error => Some(31), // LOG_COLOR_RED
                 Level::Warn => Some(33),  // LOG_COLOR_BROWN
                 Level::Info => Some(32),  // LOG_COLOR_GREEN,
@@ -248,7 +250,6 @@ impl ::log::Log for EspLogger {
 
         if self.enabled(metadata) && self.should_log(record) {
             let marker = Self::get_marker(metadata.level());
-            let timestamp = unsafe { esp_log_timestamp() };
             let target = record.metadata().target();
             let args = record.args();
             let color = Self::get_color(record.level());
@@ -256,15 +257,26 @@ impl ::log::Log for EspLogger {
             let mut stdout = EspStdout::new();
 
             if let Some(color) = color {
-                writeln!(
-                    stdout,
-                    "\x1b[0;{}m{} ({}) {}: {}\x1b[0m",
-                    color, marker, timestamp, target, args
-                )
-                .unwrap();
-            } else {
-                writeln!(stdout, "{} ({}) {}: {}", marker, timestamp, target, args).unwrap();
+                write!(stdout, "\x1b[0;{color}m").unwrap();
             }
+            write!(stdout, "{marker} (").unwrap();
+            if cfg!(esp_idf_log_timestamp_source_rtos) {
+                let timestamp = unsafe { esp_log_timestamp() };
+                write!(stdout, "{timestamp}").unwrap();
+            } else if cfg!(esp_idf_log_timestamp_source_system) {
+                // TODO: https://github.com/esp-rs/esp-idf-svc/pull/494 - official usage of
+                // `esp_log_timestamp_str()` should be tracked and replace the not thread-safe
+                // `esp_log_system_timestamp()` which has a race condition flaw due to
+                // returning a pointer to a static buffer containing the c-string.
+                let timestamp =
+                    unsafe { CStr::from_ptr(esp_log_system_timestamp()).to_str().unwrap() };
+                write!(stdout, "{timestamp}").unwrap();
+            }
+            write!(stdout, ") {target}: {args}").unwrap();
+            if color.is_some() {
+                write!(stdout, "\x1b[0m").unwrap();
+            }
+            writeln!(stdout).unwrap();
         }
     }
 

@@ -2,6 +2,9 @@
 //!
 //! Add your own ssid and password
 
+#![allow(unknown_lints)]
+#![allow(unexpected_cfgs)]
+
 fn main() {
     #[cfg(not(esp_idf_version_major = "4"))]
     example::main();
@@ -169,7 +172,7 @@ pub mod example {
 
         fn release(&mut self) -> Result<(), esp_idf_svc::sys::EspError> {
             let socket = self.0.take().unwrap();
-            socket.into_inner().unwrap().into_raw_fd();
+            let _ = socket.into_inner().unwrap().into_raw_fd();
 
             Ok(())
         }

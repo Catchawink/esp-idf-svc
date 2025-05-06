@@ -1,22 +1,21 @@
-//! Example of using blocking wifi with a static IP configuration
+//! Example of using a blocking Wifi with a DHCP configuration that has a user-supplied host name
 //!
-//! Add your own ssid and password for the access point
-//! Add your own gateway IP, netmask, and local device IP for interface configuration
+//! Add your own SSID and password for the access point
+//!
+//! Once the wifi is connected, the hostname will be set to "foo"
+//! Try pinging it from your PC with `ping foo`
 
 #![allow(unknown_lints)]
 #![allow(unexpected_cfgs)]
 
 use core::convert::TryInto;
 
-use std::net::Ipv4Addr;
-use std::str::FromStr;
-
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration as WifiConfiguration};
 
 use esp_idf_svc::hal::prelude::Peripherals;
 use esp_idf_svc::ipv4::{
-    ClientConfiguration as IpClientConfiguration, ClientSettings as IpClientSettings,
-    Configuration as IpConfiguration, Mask, Subnet,
+    ClientConfiguration as IpClientConfiguration, Configuration as IpConfiguration,
+    DHCPClientSettings,
 };
 use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::netif::{EspNetif, NetifConfiguration, NetifStack};
@@ -27,13 +26,6 @@ use log::info;
 
 const SSID: &str = env!("WIFI_SSID");
 const PASSWORD: &str = env!("WIFI_PASS");
-
-// Expects IPv4 address
-const DEVICE_IP: &str = env!("ESP_DEVICE_IP");
-// Expects IPv4 address
-const GATEWAY_IP: &str = env!("GATEWAY_IP");
-// Expects a number between 0 and 32, defaults to 24
-const GATEWAY_NETMASK: Option<&str> = option_env!("GATEWAY_NETMASK");
 
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
@@ -53,32 +45,20 @@ fn main() -> anyhow::Result<()> {
 
     info!("Wifi Interface info: {ip_info:?}");
 
-    info!("Shutting down in 5s...");
-
-    std::thread::sleep(core::time::Duration::from_secs(5));
-
-    Ok(())
+    loop {
+        std::thread::sleep(core::time::Duration::from_secs(5));
+    }
 }
 
 fn configure_wifi(wifi: WifiDriver) -> anyhow::Result<EspWifi> {
-    let netmask = GATEWAY_NETMASK.unwrap_or("24");
-    let netmask = u8::from_str(netmask)?;
-    let gateway_addr = Ipv4Addr::from_str(GATEWAY_IP)?;
-    let static_ip = Ipv4Addr::from_str(DEVICE_IP)?;
-
     let mut wifi = EspWifi::wrap_all(
         wifi,
+        // Note that setting a custom hostname can be used with any network adapter, not just Wifi
+        // I.e. that would work with Eth as well, because DHCP is an L3 protocol
         EspNetif::new_with_conf(&NetifConfiguration {
-            ip_configuration: Some(IpConfiguration::Client(IpClientConfiguration::Fixed(
-                IpClientSettings {
-                    ip: static_ip,
-                    subnet: Subnet {
-                        gateway: gateway_addr,
-                        mask: Mask(netmask),
-                    },
-                    // Can also be set to Ipv4Addrs if you need DNS
-                    dns: None,
-                    secondary_dns: None,
+            ip_configuration: Some(IpConfiguration::Client(IpClientConfiguration::DHCP(
+                DHCPClientSettings {
+                    hostname: Some("foo".try_into().unwrap()),
                 },
             ))),
             ..NetifConfiguration::wifi_default_client()

@@ -20,7 +20,7 @@ pub struct Psk<'a> {
     pub hint: &'a str,
 }
 
-impl<'a> Debug for Psk<'a> {
+impl Debug for Psk<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         f.debug_struct("Psk")
             .field("hint", &self.hint)
@@ -109,7 +109,7 @@ impl<'a> X509<'a> {
     }
 }
 
-impl<'a> Debug for X509<'a> {
+impl Debug for X509<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         f.debug_struct("X509").finish_non_exhaustive()
     }
@@ -120,6 +120,7 @@ impl<'a> Debug for X509<'a> {
     any(esp_idf_esp_tls_using_mbedtls, esp_idf_esp_tls_using_wolfssl)
 ))]
 mod esptls {
+    use core::ffi::c_char;
     #[cfg(esp_idf_esp_tls_server_cert_select_hook)]
     use core::ffi::c_int;
     use core::task::{Context, Poll};
@@ -165,7 +166,7 @@ mod esptls {
         pub is_plain_tcp: bool,
     }
 
-    impl<'a> Config<'a> {
+    impl Config<'_> {
         pub const fn new() -> Self {
             Self {
                 alpn_protos: None,
@@ -239,14 +240,25 @@ mod esptls {
                 rcfg.keep_alive_cfg = &mut raw_kac as *mut _;
             }
 
-            let mut raw_psk: sys::psk_key_hint;
-            if let Some(psk) = &self.psk_hint_key {
-                raw_psk = sys::psk_key_hint {
-                    key: psk.key.as_ptr(),
-                    key_size: psk.key.len(),
-                    hint: psk.hint.as_ptr(),
-                };
-                rcfg.psk_hint_key = &mut raw_psk as *mut _;
+            #[cfg(any(
+                esp_idf_esp_tls_psk_verification,
+                esp_idf_version_major = "4",
+                esp_idf_version = "5.0",
+                esp_idf_version = "5.1",
+                esp_idf_version = "5.2",
+                esp_idf_version = "5.3",
+                esp_idf_version = "5.4",
+            ))]
+            {
+                let mut raw_psk: sys::psk_key_hint;
+                if let Some(psk) = &self.psk_hint_key {
+                    raw_psk = sys::psk_key_hint {
+                        key: psk.key.as_ptr(),
+                        key_size: psk.key.len(),
+                        hint: psk.hint.as_ptr(),
+                    };
+                    rcfg.psk_hint_key = &mut raw_psk as *mut _;
+                }
             }
 
             #[cfg(esp_idf_mbedtls_certificate_bundle)]
@@ -265,14 +277,14 @@ mod esptls {
         }
     }
 
-    impl<'a> Default for Config<'a> {
+    impl Default for Config<'_> {
         fn default() -> Self {
             Self::new()
         }
     }
 
     struct RawConfigBufs {
-        alpn_protos: [*const i8; 10],
+        alpn_protos: [*const c_char; 10],
         alpn_protos_cbuf: [u8; 99],
         common_name_buf: [u8; MAX_COMMON_NAME_LENGTH + 1],
     }
@@ -652,7 +664,7 @@ mod esptls {
             let ret = unsafe {
                 if asynch {
                     sys::esp_tls_conn_new_async(
-                        host.as_bytes().as_ptr() as *const i8,
+                        host.as_bytes().as_ptr() as *const c_char,
                         host.len() as i32,
                         port as i32,
                         cfg,
@@ -660,7 +672,7 @@ mod esptls {
                     )
                 } else {
                     sys::esp_tls_conn_new_sync(
-                        host.as_bytes().as_ptr() as *const i8,
+                        host.as_bytes().as_ptr() as *const c_char,
                         host.len() as i32,
                         port as i32,
                         cfg,
@@ -708,7 +720,7 @@ mod esptls {
             // cannot call esp_tls_conn_read bc it's inline in v4
             let esp_tls = unsafe { core::ptr::read_unaligned(self.raw) };
             let read_func = esp_tls.read.unwrap();
-            unsafe { read_func(self.raw, buf.as_mut_ptr() as *mut i8, buf.len()) }
+            unsafe { read_func(self.raw, buf.as_mut_ptr() as *mut c_char, buf.len()) }
         }
 
         #[cfg(not(esp_idf_version_major = "4"))]
@@ -756,7 +768,7 @@ mod esptls {
             // cannot call esp_tls_conn_write bc it's inline
             let esp_tls = unsafe { core::ptr::read_unaligned(self.raw) };
             let write_func = esp_tls.write.unwrap();
-            unsafe { write_func(self.raw, buf.as_ptr() as *const i8, buf.len()) }
+            unsafe { write_func(self.raw, buf.as_ptr() as *const c_char, buf.len()) }
         }
 
         #[cfg(not(esp_idf_version_major = "4"))]
@@ -1052,7 +1064,7 @@ mod esptls {
         not(esp_idf_version_major = "4"),
         any(not(esp_idf_version_major = "5"), not(esp_idf_version_minor = "0"))
     ))]
-    impl<'a, S> futures_io::AsyncRead for &'a EspAsyncTls<S>
+    impl<S> futures_io::AsyncRead for &EspAsyncTls<S>
     where
         S: PollableSocket,
     {
@@ -1100,7 +1112,7 @@ mod esptls {
         not(esp_idf_version_major = "4"),
         any(not(esp_idf_version_major = "5"), not(esp_idf_version_minor = "0"))
     ))]
-    impl<'a, S> futures_io::AsyncWrite for &'a EspAsyncTls<S>
+    impl<S> futures_io::AsyncWrite for &EspAsyncTls<S>
     where
         S: PollableSocket,
     {

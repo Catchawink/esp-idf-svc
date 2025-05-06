@@ -2,7 +2,7 @@ use core::borrow::Borrow;
 use core::fmt::{self, Debug};
 use core::marker::PhantomData;
 
-use log::{debug, trace};
+use ::log::{debug, trace};
 
 use crate::bt::{BdAddr, BleEnabled, BtDriver, BtSingleton, BtUuid};
 use crate::sys::*;
@@ -18,7 +18,7 @@ pub type TransferId = u32;
 
 pub struct EventRawData<'a>(pub &'a esp_ble_gatts_cb_param_t);
 
-impl<'a> Debug for EventRawData<'a> {
+impl Debug for EventRawData<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("EventRawData").finish()
     }
@@ -598,7 +598,7 @@ where
             ))?;
 
             let data = core::slice::from_raw_parts(data, len as _);
-            trace!("len: {:?}, data: {:p}", len, data);
+            trace!("len: {len:?}, data: {data:p}");
 
             if buf.len() < len as _ {
                 Err(EspError::from_infallible::<ESP_ERR_INVALID_ARG>())?;
@@ -625,6 +625,7 @@ where
         response: Option<&GattResponse>,
     ) -> Result<(), EspError> {
         esp!(unsafe {
+            #[allow(clippy::unwrap_or_default)]
             esp_ble_gatts_send_response(
                 gatts_if,
                 conn_id,
@@ -683,7 +684,7 @@ where
         let param = unsafe { param.as_ref() }.unwrap();
         let event = GattsEvent::from((event, param));
 
-        debug!("Got event {{ {:#?} }}", event);
+        debug!("Got event {{ {event:#?} }}");
 
         SINGLETON.call((gatts_if, event));
     }

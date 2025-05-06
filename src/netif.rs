@@ -157,7 +157,7 @@ impl NetifConfiguration {
                 | esp_netif_flags_ESP_NETIF_FLAG_EVENT_IP_MODIFIED,
             got_ip_event_id: NonZeroU32::new(ip_event_t_IP_EVENT_ETH_GOT_IP as _),
             lost_ip_event_id: NonZeroU32::new(ip_event_t_IP_EVENT_ETH_LOST_IP as _),
-            key: "ETH_CL_DEF".try_into().unwrap(),
+            key: "ETH_DEF".try_into().unwrap(),
             description: "eth".try_into().unwrap(),
             route_priority: 60,
             ip_configuration: Some(ipv4::Configuration::Client(Default::default())),
@@ -667,7 +667,7 @@ impl fmt::Debug for ApStaIpAssignment<'_> {
 #[derive(Copy, Clone)]
 pub struct DhcpIpAssignment<'a>(&'a ip_event_got_ip_t);
 
-impl<'a> DhcpIpAssignment<'a> {
+impl DhcpIpAssignment<'_> {
     pub fn netif_handle(&self) -> *mut esp_netif_t {
         self.0.esp_netif
     }
@@ -701,7 +701,7 @@ impl<'a> DhcpIpAssignment<'a> {
     }
 }
 
-impl<'a> fmt::Debug for DhcpIpAssignment<'a> {
+impl fmt::Debug for DhcpIpAssignment<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DhcpIpAssignment")
             .field("netif_handle", &self.netif_handle())
@@ -716,7 +716,7 @@ impl<'a> fmt::Debug for DhcpIpAssignment<'a> {
 #[derive(Copy, Clone)]
 pub struct DhcpIp6Assignment<'a>(&'a ip_event_got_ip6_t);
 
-impl<'a> DhcpIp6Assignment<'a> {
+impl DhcpIp6Assignment<'_> {
     pub fn netif_handle(&self) -> *mut esp_netif_t {
         self.0.esp_netif
     }
@@ -738,7 +738,7 @@ impl<'a> DhcpIp6Assignment<'a> {
     }
 }
 
-impl<'a> fmt::Debug for DhcpIp6Assignment<'a> {
+impl fmt::Debug for DhcpIp6Assignment<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DhcpIp6Assignment")
             .field("netif_handle", &self.netif_handle())
@@ -757,16 +757,16 @@ pub enum IpEvent<'a> {
     DhcpIpDeassigned(*mut esp_netif_t),
 }
 
-unsafe impl<'a> Send for IpEvent<'a> {}
+unsafe impl Send for IpEvent<'_> {}
 
-impl<'a> IpEvent<'a> {
+impl IpEvent<'_> {
     pub fn is_for(&self, raw_handle: &impl RawHandle<Handle = *mut esp_netif_t>) -> bool {
         self.is_for_handle(raw_handle.handle())
     }
 
     pub fn is_for_handle(&self, handle: *mut esp_netif_t) -> bool {
         self.handle()
-            .map(|event_handle| event_handle == handle)
+            .map(|event_handle| core::ptr::eq(event_handle, handle))
             .unwrap_or(false)
     }
 
@@ -783,13 +783,13 @@ impl<'a> IpEvent<'a> {
     }
 }
 
-unsafe impl<'a> EspEventSource for IpEvent<'a> {
+unsafe impl EspEventSource for IpEvent<'_> {
     fn source() -> Option<&'static ffi::CStr> {
         Some(unsafe { CStr::from_ptr(IP_EVENT) })
     }
 }
 
-impl<'a> EspEventDeserializer for IpEvent<'a> {
+impl EspEventDeserializer for IpEvent<'_> {
     type Data<'d> = IpEvent<'d>;
 
     #[allow(non_upper_case_globals, non_snake_case)]
@@ -835,7 +835,7 @@ impl<'a> EspEventDeserializer for IpEvent<'a> {
 
             IpEvent::DhcpIpDeassigned(netif_handle_mut as *mut _)
         } else {
-            panic!("Unknown event ID: {}", event_id);
+            panic!("Unknown event ID: {event_id}");
         }
     }
 }
@@ -960,7 +960,7 @@ where
 mod driver {
     use core::borrow::BorrowMut;
 
-    use log::debug;
+    use ::log::debug;
 
     use crate::handle::RawHandle;
     use crate::sys::*;
@@ -1213,7 +1213,7 @@ mod driver {
         }
     }
 
-    impl<'d, T> Drop for EspNetifDriver<'d, T>
+    impl<T> Drop for EspNetifDriver<'_, T>
     where
         T: BorrowMut<EspNetif>,
     {
@@ -1258,7 +1258,7 @@ mod driver {
             alloc::boxed::Box<dyn FnMut(&mut EspNetif) -> Result<(), EspError> + Send + 'd>,
     }
 
-    impl<'d, T> EspNetifDriverInner<'d, T>
+    impl<T> EspNetifDriverInner<'_, T>
     where
         T: BorrowMut<EspNetif>,
     {
@@ -1269,7 +1269,7 @@ mod driver {
                 ..Default::default()
             };
 
-            debug!("Post attach ifconfig: {:?}", driver_ifconfig);
+            debug!("Post attach ifconfig: {driver_ifconfig:?}");
 
             // d->base.netif = esp_netif; TODO: This is weird; the netif in base is already set on constructor?
 
@@ -1426,7 +1426,7 @@ mod ppp {
                     PppEvent::PhaseDisconnect
                 }
                 esp_netif_ppp_status_event_t_NETIF_PPP_CONNECT_FAILED => PppEvent::PhaseFailed,
-                _ => panic!("Unknown event ID: {}", event_id),
+                _ => panic!("Unknown event ID: {event_id}"),
             }
         }
     }

@@ -49,7 +49,7 @@ pub struct BackgroundLoopConfiguration<'a> {
     pub task_pin_to_core: Core,
 }
 
-impl<'a> Default for BackgroundLoopConfiguration<'a> {
+impl Default for BackgroundLoopConfiguration<'_> {
     fn default() -> Self {
         Self {
             queue_size: 64,
@@ -217,13 +217,13 @@ impl<'a> EspEventPostData<'a> {
     }
 }
 
-unsafe impl<'a> EspEventSource for EspEventPostData<'a> {
+unsafe impl EspEventSource for EspEventPostData<'_> {
     fn source() -> Option<&'static ffi::CStr> {
         None
     }
 }
 
-impl<'a> EspEventSerializer for EspEventPostData<'a> {
+impl EspEventSerializer for EspEventPostData<'_> {
     type Data<'d> = EspEventPostData<'d>;
 
     fn serialize<F, R>(data: &Self::Data<'_>, f: F) -> R
@@ -268,13 +268,13 @@ impl<'a> EspEvent<'a> {
     }
 }
 
-unsafe impl<'a> EspEventSource for EspEvent<'a> {
+unsafe impl EspEventSource for EspEvent<'_> {
     fn source() -> Option<&'static ffi::CStr> {
         None
     }
 }
 
-impl<'a> EspEventDeserializer for EspEvent<'a> {
+impl EspEventDeserializer for EspEvent<'_> {
     type Data<'d> = EspEvent<'d>;
 
     fn deserialize<'d>(data: &EspEvent<'d>) -> Self::Data<'d> {
@@ -343,7 +343,7 @@ where
     _callback: Box<Box<dyn FnMut(EspEvent) + Send + 'a>>,
 }
 
-impl<'a, T> EspSubscription<'a, T>
+impl<T> EspSubscription<'_, T>
 where
     T: EspEventLoopType,
 {
@@ -369,18 +369,21 @@ where
     }
 }
 
-unsafe impl<'a, T> Send for EspSubscription<'a, T> where T: EspEventLoopType {}
+unsafe impl<T> Send for EspSubscription<'_, T> where T: EspEventLoopType {}
 
-impl<'a, T> Drop for EspSubscription<'a, T>
+impl<T> Drop for EspSubscription<'_, T>
 where
     T: EspEventLoopType,
 {
     fn drop(&mut self) {
+        #[allow(clippy::unwrap_or_default)]
         if let Some(handle) = self.event_loop_handle.upgrade() {
             if T::is_system() {
                 unsafe {
                     esp!(esp_event_handler_instance_unregister(
-                        self.source.map(ffi::CStr::as_ptr).unwrap_or(ptr::null()),
+                        self.source
+                            .map(ffi::CStr::as_ptr)
+                            .unwrap_or(core::ptr::null()),
                         self.event_id,
                         self.handler_instance
                     ))
@@ -393,7 +396,9 @@ where
 
                     esp!(esp_event_handler_instance_unregister_with(
                         user.0,
-                        self.source.map(ffi::CStr::as_ptr).unwrap_or(ptr::null()),
+                        self.source
+                            .map(ffi::CStr::as_ptr)
+                            .unwrap_or(core::ptr::null()),
                         self.event_id,
                         self.handler_instance
                     ))
@@ -404,7 +409,7 @@ where
     }
 }
 
-impl<'a, T> RawHandle for EspSubscription<'a, User<T>>
+impl<T> RawHandle for EspSubscription<'_, User<T>>
 where
     T: EspEventLoopType,
 {
@@ -868,7 +873,7 @@ where
         duration: Option<Duration>,
     ) -> Result<(), EspError> {
         if let Some(duration) = duration {
-            debug!("About to wait for duration {:?}", duration);
+            debug!("About to wait for duration {duration:?}");
 
             let (timeout, _) =
                 self.waitable
@@ -904,7 +909,7 @@ mod async_wait {
 
     use esp_idf_hal::task::asynch::Notification;
 
-    use log::debug;
+    use ::log::debug;
 
     use super::{EspEventDeserializer, EspEventLoop, EspEventLoopType, EspSubscription};
     use crate::sys::{esp, EspError, ESP_ERR_TIMEOUT};
@@ -961,7 +966,7 @@ mod async_wait {
             });
 
             if let Some(duration) = duration {
-                debug!("About to wait for duration {:?}", duration);
+                debug!("About to wait for duration {duration:?}");
 
                 let timer_wait = self.timer.after(duration);
 

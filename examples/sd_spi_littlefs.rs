@@ -1,17 +1,61 @@
-#![allow(unknown_lints)]
+//! An example of mounting, formatting, and using an SD card with Littlefs
+//!
+//! To use, put this in your `Cargo.toml`:
+//! ```
+//! [[package.metadata.esp-idf-sys.extra_components]]
+//! remote_component = { name = "joltwallet/littlefs", version = "1.14" }
+//! ```
+//!
+//! To use with an SD card, put this in your `sdkconfig.defaults`:
+//! ```
+//! CONFIG_LITTLEFS_SDMMC_SUPPORT=y
+//! ```
+//!
+//! NOTE: While this example is using the SD card via the SPI interface,
+//! it is also possible to use the SD card via the SDMMC interface. Moreover,
+//! it is possible to initialize and use Littlefs with the internal Flash
+//! storage as well, by using one of the two unsafe constructors that take
+//! a partition label or a raw partition pointer.
+
 #![allow(unexpected_cfgs)]
 
-#[cfg(esp32)]
 fn main() -> anyhow::Result<()> {
+    esp_idf_svc::sys::link_patches();
+    esp_idf_svc::log::EspLogger::initialize_default();
+
+    #[cfg(not(esp32))]
+    {
+        log::error!("This example is configured for esp32, please adjust pins to your module.");
+    }
+
+    #[cfg(esp32)]
+    {
+        #[cfg(i_have_done_all_configs_from_the_top_comment)]
+        // Remove this `cfg` when you have done all of the above for the example to compile
+        example_main()?;
+
+        // Remove this whole code block when you have done all of the above for the example to compile
+        #[cfg(not(i_have_done_all_configs_from_the_top_comment))]
+        {
+            log::error!("Please follow the instructions in the source code.");
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(i_have_done_all_configs_from_the_top_comment)] // Remove this `cfg` when you have done all of the above for the example to compile
+#[cfg(esp32)]
+fn example_main() -> anyhow::Result<()> {
     use std::fs::{read_dir, File};
     use std::io::{Read, Seek, Write};
 
-    use esp_idf_svc::fs::fatfs::Fatfs;
+    use esp_idf_svc::fs::littlefs::Littlefs;
     use esp_idf_svc::hal::gpio::AnyIOPin;
     use esp_idf_svc::hal::prelude::*;
     use esp_idf_svc::hal::sd::{spi::SdSpiHostDriver, SdCardConfiguration, SdCardDriver};
     use esp_idf_svc::hal::spi::{config::DriverConfig, Dma, SpiDriver};
-    use esp_idf_svc::io::vfs::MountedFatfs;
+    use esp_idf_svc::io::vfs::MountedLittlefs;
     use esp_idf_svc::log::EspLogger;
 
     use log::info;
@@ -48,8 +92,18 @@ fn main() -> anyhow::Result<()> {
         &SdCardConfiguration::new(),
     )?;
 
+    let littlefs = Littlefs::new_sdcard(sd_card_driver)?;
+
+    // Format it first, as chances are, the user won't have easy access to the Littlefs filesystem from her PC
+    // Commented out for safety
+    // log::info!("Formatting the SD card");
+    // littlefs.format()?;
+    // log::info!("SD card formatted");
+
     // Keep it around or else it will be dropped and unmounted
-    let _mounted_fatfs = MountedFatfs::mount(Fatfs::new_sdcard(0, sd_card_driver)?, "/sdcard", 4)?;
+    let mounted_littlefs = MountedLittlefs::mount(littlefs, "/sdcard")?;
+
+    info!("Filesystem usage: {:?}", mounted_littlefs.info()?);
 
     let content = b"Hello, world!";
 
@@ -90,11 +144,4 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-#[cfg(not(esp32))]
-fn main() {
-    use esp_idf_svc::{self as _};
-
-    panic!("This example is configured for esp32, please adjust pins to your module");
 }

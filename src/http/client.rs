@@ -54,7 +54,7 @@ impl From<Method> for Newtype<(esp_http_client_method_t, ())> {
                 Method::Subscribe => esp_http_client_method_t_HTTP_METHOD_SUBSCRIBE,
                 Method::Unsubscribe => esp_http_client_method_t_HTTP_METHOD_UNSUBSCRIBE,
                 Method::Patch => esp_http_client_method_t_HTTP_METHOD_PATCH,
-                method => panic!("Method {:?} is not supported", method),
+                method => panic!("Method {method:?} is not supported"),
             },
             (),
         ))
@@ -445,7 +445,7 @@ impl EspHttpConnection {
                 let status = unsafe { esp_http_client_get_status_code(self.raw_client) as u16 };
 
                 if status::REDIRECT.contains(&status) && status != 304 {
-                    info!("Got response {}, about to follow redirect", status);
+                    info!("Got response {status}, about to follow redirect");
 
                     let mut len = 0_i32;
                     esp!(unsafe { esp_http_client_flush_response(self.raw_client, &mut len) })?;

@@ -6,7 +6,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 
-use log::info;
+use ::log::info;
 
 use num_enum::TryFromPrimitive;
 
@@ -572,7 +572,7 @@ where
 
         #[cfg(not(any(esp32, esp32s3, esp32c3)))]
         let mut bt_cfg = esp_bt_controller_config_t {
-            config_version: 0x20231124,
+            config_version: CONFIG_VERSION as _,
             ble_ll_resolv_list_size: crate::sys::CONFIG_BT_LE_LL_RESOLV_LIST_SIZE as _,
             ble_hci_evt_hi_buf_count: crate::sys::DEFAULT_BT_LE_HCI_EVT_HI_BUF_COUNT as _,
             ble_hci_evt_lo_buf_count: crate::sys::DEFAULT_BT_LE_HCI_EVT_LO_BUF_COUNT as _,
@@ -608,7 +608,9 @@ where
                 esp_idf_version_major = "4",
                 esp_idf_version = "5.0",
                 esp_idf_version = "5.1",
-                esp_idf_version = "5.2",
+                esp_idf_version_full = "5.2.0",
+                esp_idf_version_full = "5.2.1",
+                esp_idf_version_full = "5.2.2",
                 not(any(esp32c6, esp32h2))
             ))]
             enable_uart_hci: crate::sys::HCI_UART_EN as _,
@@ -616,7 +618,9 @@ where
                 esp_idf_version_major = "4",
                 esp_idf_version = "5.0",
                 esp_idf_version = "5.1",
-                esp_idf_version = "5.2",
+                esp_idf_version_full = "5.2.0",
+                esp_idf_version_full = "5.2.1",
+                esp_idf_version_full = "5.2.2",
                 not(any(esp32c6, esp32h2))
             ))]
             ble_hci_uart_port: crate::sys::DEFAULT_BT_LE_HCI_UART_PORT as _,
@@ -624,7 +628,9 @@ where
                 esp_idf_version_major = "4",
                 esp_idf_version = "5.0",
                 esp_idf_version = "5.1",
-                esp_idf_version = "5.2",
+                esp_idf_version_full = "5.2.0",
+                esp_idf_version_full = "5.2.1",
+                esp_idf_version_full = "5.2.2",
                 not(any(esp32c6, esp32h2))
             ))]
             ble_hci_uart_baud: crate::sys::DEFAULT_BT_LE_HCI_UART_BAUD,
@@ -632,7 +638,9 @@ where
                 esp_idf_version_major = "4",
                 esp_idf_version = "5.0",
                 esp_idf_version = "5.1",
-                esp_idf_version = "5.2",
+                esp_idf_version_full = "5.2.0",
+                esp_idf_version_full = "5.2.1",
+                esp_idf_version_full = "5.2.2",
                 not(any(esp32c6, esp32h2))
             ))]
             ble_hci_uart_data_bits: crate::sys::DEFAULT_BT_LE_HCI_UART_DATA_BITS as _,
@@ -640,7 +648,9 @@ where
                 esp_idf_version_major = "4",
                 esp_idf_version = "5.0",
                 esp_idf_version = "5.1",
-                esp_idf_version = "5.2",
+                esp_idf_version_full = "5.2.0",
+                esp_idf_version_full = "5.2.1",
+                esp_idf_version_full = "5.2.2",
                 not(any(esp32c6, esp32h2))
             ))]
             ble_hci_uart_stop_bits: crate::sys::DEFAULT_BT_LE_HCI_UART_STOP_BITS as _,
@@ -648,7 +658,9 @@ where
                 esp_idf_version_major = "4",
                 esp_idf_version = "5.0",
                 esp_idf_version = "5.1",
-                esp_idf_version = "5.2",
+                esp_idf_version_full = "5.2.0",
+                esp_idf_version_full = "5.2.1",
+                esp_idf_version_full = "5.2.2",
                 not(any(esp32c6, esp32h2))
             ))]
             ble_hci_uart_flow_ctrl: crate::sys::DEFAULT_BT_LE_HCI_UART_FLOW_CTRL as _,
@@ -656,7 +668,9 @@ where
                 esp_idf_version_major = "4",
                 esp_idf_version = "5.0",
                 esp_idf_version = "5.1",
-                esp_idf_version = "5.2",
+                esp_idf_version_full = "5.2.0",
+                esp_idf_version_full = "5.2.1",
+                esp_idf_version_full = "5.2.2",
                 not(any(esp32c6, esp32h2))
             ))]
             ble_hci_uart_uart_parity: crate::sys::DEFAULT_BT_LE_HCI_UART_PARITY as _,
@@ -671,7 +685,8 @@ where
             #[cfg(esp32c2)]
             version_num: unsafe { crate::sys::esp_ble_get_chip_rev_version() },
             #[cfg(esp32c6)]
-            version_num: unsafe { crate::sys::efuse_hal_chip_revision() },
+            #[allow(clippy::unnecessary_cast)]
+            version_num: unsafe { crate::sys::efuse_hal_chip_revision() as _ },
             #[cfg(not(esp32c2))]
             cpu_freq_mhz: crate::sys::CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ as _,
             ignore_wl_for_direct_adv: 0,
@@ -683,7 +698,7 @@ where
                 not(esp_idf_version = "5.1")
             ))]
             csa2_select: crate::sys::DEFAULT_BT_LE_50_FEATURE_SUPPORT as _,
-            config_magic: 0x5A5AA5A5,
+            config_magic: CONFIG_MAGIC as _,
             ..Default::default()
         };
 
@@ -709,7 +724,7 @@ where
     }
 }
 
-impl<'d, M> Drop for BtDriver<'d, M>
+impl<M> Drop for BtDriver<'_, M>
 where
     M: BtMode,
 {
@@ -724,5 +739,5 @@ where
     }
 }
 
-unsafe impl<'d, M> Send for BtDriver<'d, M> where M: BtMode {}
-unsafe impl<'d, M> Sync for BtDriver<'d, M> where M: BtMode {}
+unsafe impl<M> Send for BtDriver<'_, M> where M: BtMode {}
+unsafe impl<M> Sync for BtDriver<'_, M> where M: BtMode {}

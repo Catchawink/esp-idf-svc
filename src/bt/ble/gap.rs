@@ -6,7 +6,7 @@ use core::{ffi::CStr, ops::BitOr};
 use crate::bt::BtSingleton;
 use crate::sys::*;
 
-use log::debug;
+use ::log::debug;
 
 use crate::{
     bt::{BdAddr, BleEnabled, BtDriver, BtStatus, BtUuid},
@@ -182,7 +182,7 @@ pub struct AdvConfiguration<'a> {
     pub manufacturer_data: Option<&'a [u8]>,
 }
 
-impl<'a> Default for AdvConfiguration<'a> {
+impl Default for AdvConfiguration<'_> {
     fn default() -> Self {
         Self {
             set_scan_rsp: false,
@@ -231,7 +231,7 @@ impl<'a> From<&'a AdvConfiguration<'a>> for esp_ble_adv_data_t {
 
 pub struct EventRawData<'a>(pub &'a esp_ble_gap_cb_param_t);
 
-impl<'a> Debug for EventRawData<'a> {
+impl Debug for EventRawData<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("EventRawData").finish()
     }
@@ -656,6 +656,14 @@ where
         esp!(unsafe { esp_ble_set_encryption(&addr.0 as *const _ as *mut _, encryption as u32) })
     }
 
+    pub fn start_scanning(&self, duration: u32) -> Result<(), EspError> {
+        esp!(unsafe { esp_ble_gap_start_scanning(duration) })
+    }
+
+    pub fn stop_scanning(&self) -> Result<(), EspError> {
+        esp!(unsafe { esp_ble_gap_stop_scanning() })
+    }
+
     pub fn start_advertising(&self) -> Result<(), EspError> {
         let mut adv_param: esp_ble_adv_params_t = esp_ble_adv_params_t {
             // TODO
@@ -702,7 +710,7 @@ where
         let param = unsafe { param.as_ref() }.unwrap();
         let event = BleGapEvent::from((event, param));
 
-        debug!("Got event {{ {:#?} }}", event);
+        debug!("Got event {{ {event:#?} }}");
 
         SINGLETON.call(event);
     }

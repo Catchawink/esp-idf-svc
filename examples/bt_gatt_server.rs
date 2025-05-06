@@ -28,6 +28,9 @@
 //! CONFIG_BT_BTC_TASK_STACK_SIZE=15000
 //! CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY=y
 
+#![allow(unknown_lints)]
+#![allow(unexpected_cfgs)]
+
 #[cfg(all(not(esp32s2), feature = "experimental"))]
 fn main() -> anyhow::Result<()> {
     example::main()
@@ -692,13 +695,13 @@ mod example {
 
         fn check_esp_status(&self, status: Result<(), EspError>) {
             if let Err(e) = status {
-                warn!("Got status: {:?}", e);
+                warn!("Got status: {e:?}");
             }
         }
 
         fn check_bt_status(&self, status: BtStatus) -> Result<(), EspError> {
             if !matches!(status, BtStatus::Success) {
-                warn!("Got status: {:?}", status);
+                warn!("Got status: {status:?}");
                 Err(EspError::from_infallible::<ESP_FAIL>())
             } else {
                 Ok(())
@@ -707,7 +710,7 @@ mod example {
 
         fn check_gatt_status(&self, status: GattStatus) -> Result<(), EspError> {
             if !matches!(status, GattStatus::Ok) {
-                warn!("Got status: {:?}", status);
+                warn!("Got status: {status:?}");
                 Err(EspError::from_infallible::<ESP_FAIL>())
             } else {
                 Ok(())

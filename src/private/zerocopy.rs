@@ -11,7 +11,7 @@ use alloc::sync::{Arc, Weak};
 
 use esp_idf_hal::task::asynch::Notification;
 
-use log::info;
+use ::log::info;
 
 pub struct Receiver<T>(Weak<Channel<T>>)
 where
@@ -89,6 +89,8 @@ where
 ///
 /// Even though Receiver<T> requires T: 'static, we need to implement this for all lifetimes.
 /// This is due to a rustc bug: https://github.com/rust-lang/rust/issues/110338
+#[allow(clippy::extra_unused_lifetimes)]
+#[allow(clippy::needless_lifetimes)]
 unsafe impl<'a, T> Send for Receiver<T> where T: Send + 'a {}
 
 pub struct QuitOnDrop<T>(Arc<Channel<T>>)
@@ -202,6 +204,8 @@ where
 ///
 /// Even though Channel<T> requires T: 'static, we need to implement this for all lifetimes.
 /// This is due to a rustc bug: https://github.com/rust-lang/rust/issues/110338
+#[allow(clippy::extra_unused_lifetimes)]
+#[allow(clippy::needless_lifetimes)]
 unsafe impl<'a, T> Send for Channel<T> where T: Send + 'a {}
 
 /// SAFETY: The channel uses a mutex to synchronize access to the shared state.
@@ -210,6 +214,8 @@ unsafe impl<'a, T> Send for Channel<T> where T: Send + 'a {}
 ///
 /// Even though Channel<T> requires T: 'static, we need to implement this for all lifetimes.
 /// This is due to a rustc bug: https://github.com/rust-lang/rust/issues/110338
+#[allow(clippy::extra_unused_lifetimes)]
+#[allow(clippy::needless_lifetimes)]
 unsafe impl<'a, T> Sync for Channel<T> where T: Send + 'a {}
 
 #[derive(Copy, Clone, Debug)]

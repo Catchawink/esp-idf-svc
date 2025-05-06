@@ -35,6 +35,10 @@
 use core::cell::UnsafeCell;
 use core::fmt::Debug;
 use core::marker::PhantomData;
+#[cfg(esp_idf_lwip_ipv4)]
+use core::net::Ipv4Addr;
+#[cfg(esp_idf_lwip_ipv6)]
+use core::net::Ipv6Addr;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::*;
 use core::{ffi, ptr};
@@ -53,6 +57,8 @@ use ::log::{info, warn};
 use embedded_svc::http::headers::content_type;
 use embedded_svc::http::*;
 use embedded_svc::io::{ErrorType, Read, Write};
+
+use esp_idf_hal::cpu::Core;
 
 use crate::sys::*;
 
@@ -79,6 +85,7 @@ pub struct Configuration {
     pub http_port: u16,
     pub ctrl_port: u16,
     pub https_port: u16,
+    pub core: Option<Core>,
     pub max_sessions: usize,
     pub session_timeout: Duration,
     pub stack_size: usize,
@@ -99,6 +106,7 @@ impl Default for Configuration {
             http_port: 80,
             ctrl_port: 32768,
             https_port: 443,
+            core: None,
             max_sessions: 16,
             session_timeout: Duration::from_secs(20 * 60),
             #[cfg(not(esp_idf_esp_https_server_enable))]
@@ -137,7 +145,7 @@ impl From<&Configuration> for Newtype<httpd_config_t> {
             ))]
             task_caps: (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
             stack_size: conf.stack_size,
-            core_id: i32::MAX,
+            core_id: conf.core.map(|core| core.into()).unwrap_or(i32::MAX),
             server_port: conf.http_port,
             ctrl_port: conf.ctrl_port,
             max_open_sockets: conf.max_open_sockets as _,
@@ -377,7 +385,7 @@ impl<'a> EspHttpServer<'a> {
             }
         }
 
-        info!("Started Httpd server with config {:?}", conf);
+        info!("Started Httpd server with config {conf:?}");
 
         let server = Self {
             sd: handle,
@@ -670,13 +678,13 @@ impl<'a> EspHttpServer<'a> {
     }
 }
 
-impl<'a> Drop for EspHttpServer<'a> {
+impl Drop for EspHttpServer<'_> {
     fn drop(&mut self) {
         self.stop().expect("Unable to stop the server cleanly");
     }
 }
 
-impl<'a> RawHandle for EspHttpServer<'a> {
+impl RawHandle for EspHttpServer<'_> {
     type Handle = httpd_handle_t;
 
     fn handle(&self) -> Self::Handle {
@@ -740,7 +748,7 @@ impl<H, N> NonstaticChain<H, N> {
     }
 }
 
-unsafe impl<'a> EspHttpTraversableChainNonstatic<'a> for ChainRoot {}
+unsafe impl EspHttpTraversableChainNonstatic<'_> for ChainRoot {}
 
 impl<'a, H, N> EspHttpTraversableChain<'a> for NonstaticChain<H, N>
 where
@@ -767,7 +775,7 @@ where
 
 pub struct EspHttpRawConnection<'a>(&'a mut httpd_req_t);
 
-impl<'a> EspHttpRawConnection<'a> {
+impl EspHttpRawConnection<'_> {
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, EspError> {
         if !buf.is_empty() {
             let fd = unsafe { httpd_req_to_sockfd(self.0) };
@@ -799,9 +807,65 @@ impl<'a> EspHttpRawConnection<'a> {
 
         Ok(())
     }
+
+    /// Retrieves the source IPv4 of the request.
+    ///
+    /// The IPv4 is retrieved using the underlying session socket.
+    #[cfg(esp_idf_lwip_ipv4)]
+    pub fn source_ipv4(&self) -> Result<Ipv4Addr, EspError> {
+        unsafe {
+            let sockfd = httpd_req_to_sockfd(self.handle());
+
+            if sockfd == -1 {
+                return Err(EspError::from_infallible::<ESP_FAIL>());
+            }
+
+            let mut addr = sockaddr_in {
+                sin_len: core::mem::size_of::<sockaddr_in>() as _,
+                sin_family: AF_INET as _,
+                ..Default::default()
+            };
+
+            esp!(lwip_getpeername(
+                sockfd,
+                &mut addr as *mut _ as *mut _,
+                &mut core::mem::size_of::<sockaddr_in>() as *mut _ as *mut _,
+            ))?;
+
+            Ok(Ipv4Addr::from(u32::from_be(addr.sin_addr.s_addr)))
+        }
+    }
+
+    /// Retrieves the source IPv6 of the request.
+    ///
+    /// The IPv6 is retrieved using the underlying session socket.
+    #[cfg(esp_idf_lwip_ipv6)]
+    pub fn source_ipv6(&self) -> Result<Ipv6Addr, EspError> {
+        unsafe {
+            let sockfd = httpd_req_to_sockfd(self.handle());
+
+            if sockfd == -1 {
+                return Err(EspError::from_infallible::<ESP_FAIL>());
+            }
+
+            let mut addr = sockaddr_in6 {
+                sin6_len: core::mem::size_of::<sockaddr_in6>() as _,
+                sin6_family: AF_INET6 as _,
+                ..Default::default()
+            };
+
+            esp!(lwip_getpeername(
+                sockfd,
+                &mut addr as *mut _ as *mut _,
+                &mut core::mem::size_of::<sockaddr_in6>() as *mut _ as *mut _,
+            ))?;
+
+            Ok(Ipv6Addr::from(addr.sin6_addr.un.u8_addr))
+        }
+    }
 }
 
-impl<'a> RawHandle for EspHttpRawConnection<'a> {
+impl RawHandle for EspHttpRawConnection<'_> {
     type Handle = *mut httpd_req_t;
 
     fn handle(&self) -> Self::Handle {
@@ -809,17 +873,17 @@ impl<'a> RawHandle for EspHttpRawConnection<'a> {
     }
 }
 
-impl<'a> ErrorType for EspHttpRawConnection<'a> {
+impl ErrorType for EspHttpRawConnection<'_> {
     type Error = EspIOError;
 }
 
-impl<'a> Read for EspHttpRawConnection<'a> {
+impl Read for EspHttpRawConnection<'_> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         EspHttpRawConnection::read(self, buf).map_err(EspIOError)
     }
 }
 
-impl<'a> Write for EspHttpRawConnection<'a> {
+impl Write for EspHttpRawConnection<'_> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         EspHttpRawConnection::write(self, buf).map_err(EspIOError)
     }
@@ -1073,22 +1137,15 @@ impl<'a> EspHttpConnection<'a> {
         E: Debug,
     {
         if self.headers.is_some() {
-            info!(
-                "About to handle internal error [{:?}], response not sent yet",
-                &error
-            );
+            info!("About to handle internal error [{error:?}], response not sent yet");
 
             if let Err(error2) = self.render_error(&error) {
                 warn!(
-                    "Internal error[{}] while rendering another internal error:\n{:?}",
-                    error2, error
+                    "Internal error[{error2}] while rendering another internal error:\n{error:?}"
                 );
             }
         } else {
-            warn!(
-                "Unhandled internal error [{:?}], response is already sent",
-                error
-            );
+            warn!("Unhandled internal error [{error:?}], response is already sent");
         }
     }
 
@@ -1130,7 +1187,7 @@ impl<'a> EspHttpConnection<'a> {
     }
 }
 
-impl<'a> RawHandle for EspHttpConnection<'a> {
+impl RawHandle for EspHttpConnection<'_> {
     type Handle = *mut httpd_req_t;
 
     fn handle(&self) -> Self::Handle {
@@ -1138,7 +1195,7 @@ impl<'a> RawHandle for EspHttpConnection<'a> {
     }
 }
 
-impl<'a> Query for EspHttpConnection<'a> {
+impl Query for EspHttpConnection<'_> {
     fn uri(&self) -> &str {
         EspHttpConnection::uri(self)
     }
@@ -1148,23 +1205,23 @@ impl<'a> Query for EspHttpConnection<'a> {
     }
 }
 
-impl<'a> embedded_svc::http::Headers for EspHttpConnection<'a> {
+impl embedded_svc::http::Headers for EspHttpConnection<'_> {
     fn header(&self, name: &str) -> Option<&str> {
         EspHttpConnection::header(self, name)
     }
 }
 
-impl<'a> ErrorType for EspHttpConnection<'a> {
+impl ErrorType for EspHttpConnection<'_> {
     type Error = EspIOError;
 }
 
-impl<'a> Read for EspHttpConnection<'a> {
+impl Read for EspHttpConnection<'_> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         EspHttpConnection::read(self, buf).map_err(EspIOError)
     }
 }
 
-impl<'a> Write for EspHttpConnection<'a> {
+impl Write for EspHttpConnection<'_> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         EspHttpConnection::write(self, buf).map_err(EspIOError)
     }
@@ -1515,19 +1572,31 @@ pub mod ws {
         /// made to that URI, receiving a different `EspHttpWsConnection` each
         /// call.
         ///
+        /// # Arguments
+        ///
+        /// * `uri` - The URI to connect to
+        /// * `subprotocol_list` - An optional string slice containing a comma-separated
+        ///   list of subprotocols to be supported by this handler
+        /// * handler: the handler
+        ///
         /// Note that Websockets functionality is gated behind an SDK flag.
         /// See [`crate::ws`](esp-idf-svc::ws)
-        pub fn ws_handler<H, E>(&mut self, uri: &str, handler: H) -> Result<&mut Self, EspError>
+        pub fn ws_handler<H, E>(
+            &mut self,
+            uri: &str,
+            subprotocol_list: Option<&str>,
+            handler: H,
+        ) -> Result<&mut Self, EspError>
         where
             H: for<'r> Fn(&'r mut EspHttpWsConnection) -> Result<(), E> + Send + Sync + 'a,
             E: Debug,
         {
-            let c_str = to_cstring_arg(uri)?;
+            let uri_c_str = to_cstring_arg(uri)?;
 
             let (req_handler, close_handler) = self.to_native_ws_handler(self.sd, handler);
 
-            let conf = httpd_uri_t {
-                uri: c_str.as_ptr() as _,
+            let mut conf = httpd_uri_t {
+                uri: uri_c_str.as_ptr() as _,
                 method: Newtype::<ffi::c_uint>::from(Method::Get).0,
                 user_ctx: Box::into_raw(Box::new(req_handler)) as *mut _,
                 handler: Some(EspHttpServer::handle_req),
@@ -1535,6 +1604,12 @@ pub mod ws {
                 // TODO: Expose as a parameter in future: handle_ws_control_frames: true,
                 ..Default::default()
             };
+
+            let subproto_c_str; // SAFETY: same scope as httpd_register_uri_handler required!
+            if let Some(subprotocol_list) = subprotocol_list {
+                subproto_c_str = to_cstring_arg(subprotocol_list)?;
+                conf.supported_subprotocol = subproto_c_str.as_ptr();
+            }
 
             esp!(unsafe { crate::sys::httpd_register_uri_handler(self.sd, &conf) })?;
 
@@ -1551,10 +1626,10 @@ pub mod ws {
 
             info!(
                 "Registered Httpd server WS handler for URI \"{}\"",
-                c_str.to_str().unwrap()
+                uri_c_str.to_str().unwrap()
             );
 
-            self.registrations.push((c_str, conf));
+            self.registrations.push((uri_c_str, conf));
 
             Ok(self)
         }
@@ -1576,7 +1651,7 @@ pub mod ws {
         where
             E: Debug,
         {
-            warn!("Unhandled internal error [{:?}]:\n{:?}", error, error);
+            warn!("Unhandled internal error [{error:?}]:\n{error:?}");
 
             ESP_OK as _
         }
