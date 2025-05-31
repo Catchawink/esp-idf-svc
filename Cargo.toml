@@ -59,7 +59,7 @@ esp-idf-hal = { git = "https://github.com/Catchawink/esp-idf-hal.git", branch = 
 embuild = { git = "https://github.com/Catchawink/embuild.git", branch = "temp" }
 
 [build-dependencies]
-embuild = "0.32.0"
+embuild = { git = "https://github.com/Catchawink/embuild.git", branch = "temp" }
 
 [dev-dependencies]
 anyhow = "1"
